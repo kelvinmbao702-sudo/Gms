@@ -1357,3 +1357,41 @@ nav{position:sticky;top:0;width:100%;z-index:999;display:flex;align-items:center
   .form-row{grid-template-columns:1fr;}
   .leader-avatar{width:70px;height:70px;font-size:2.2rem;}
 }
+/* ============================================================
+   VAULT UNLOCK MANAGER
+   ============================================================ */
+.vu-user-card{background:var(--n2);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:1rem 1.2rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-bottom:.65rem;flex-wrap:wrap;}
+.vu-user-info{display:flex;align-items:center;gap:.85rem;flex:1;min-width:0;}
+.vu-avatar{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--gd),var(--green));display:flex;align-items:center;justify-content:center;font-weight:900;font-size:1.1rem;color:#fff;flex-shrink:0;}
+.vu-name{color:#fff;font-weight:700;font-size:.88rem;margin-bottom:.2rem;}
+.vu-meta{color:rgba(255,255,255,.42);font-size:.74rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.vu-actions{display:flex;gap:.5rem;flex-shrink:0;flex-wrap:wrap;}
+.abtn-r{background:#ef4444;color:#fff;border:none;padding:.45rem .9rem;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:inherit;transition:all .18s;}
+.abtn-r:hover{background:#dc2626;}
+
+/* ============================================================
+   PAYMENT MODAL — responsive improvements
+   ============================================================ */
+.ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;padding:1rem;overflow-y:auto;}
+.ov.on{display:flex;}
+.pm-card{background:#fff;border-radius:26px;padding:2rem 2rem 2.4rem;max-width:480px;width:100%;position:relative;animation:suAnim .32s ease;max-height:90vh;overflow-y:auto;margin:auto;}
+.pm-card::-webkit-scrollbar{width:5px;}
+.pm-card::-webkit-scrollbar-thumb{background:rgba(0,0,0,.12);border-radius:4px;}
+.pay-confirm-header{background:linear-gradient(135deg,var(--green),var(--gd));color:#fff;border-radius:12px;padding:.65rem 1rem;font-weight:700;font-size:.85rem;margin-bottom:.85rem;text-align:center;}
+.mm-select{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.5rem;margin-bottom:1rem;}
+
+/* ============================================================
+   DASHBOARD — phase label
+   ============================================================ */
+.pc{background:var(--cream);border-radius:18px;padding:1.6rem;border:1px solid rgba(0,0,0,.06);transition:box-shadow .2s;}
+.pc:hover{box-shadow:0 4px 18px rgba(0,0,0,.07);}
+
+@media(max-width:600px){
+  .vu-user-card{flex-direction:column;align-items:flex-start;}
+  .vu-meta{white-space:normal;}
+  .pm-card{padding:1.5rem 1.2rem 2rem;border-radius:18px;}
+  .pay-amt-box .amt{font-size:1.8rem;}
+  .mm-select{grid-template-columns:1fr 1fr;}
+}
+
+

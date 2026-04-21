@@ -81,6 +81,7 @@
       <div class="adm-sb-item" onclick="admGo('transfer')"><span>💸</span>Money Transfer</div>
       <div class="adm-sb-item" onclick="admGo('feedback')"><span>💬</span>Feedback</div>
       <div class="adm-sb-item" onclick="admGo('payconfirm')"><span>✅</span>Pay Confirmations</div>
+      <div class="adm-sb-item" onclick="admGo('vaultunlock')"><span>🔓</span>Vault Unlock</div>
       <div class="adm-sb-item" onclick="admGo('departments')"><span>🏢</span>Departments</div>
       <div class="adm-sb-item" onclick="admGo('social')"><span>📱</span>Social Media</div>
       <div class="adm-sb-item" onclick="admGo('roadmap')"><span>📋</span>Roadmap</div>
@@ -266,6 +267,37 @@
         <div id="pc-list"></div>
       </div>
 
+      <!-- VAULT UNLOCK -->
+      <div class="asec" id="asec-vaultunlock">
+        <div class="ah"><h2>🔓 Vault Unlock Manager</h2><p>Manually grant or revoke Vault access for any user — paid or unpaid</p></div>
+        <div class="astats" style="grid-template-columns:repeat(3,1fr);">
+          <div class="astat"><div class="astat-v" id="vu-total-users">0</div><div class="astat-l">Total Users</div></div>
+          <div class="astat"><div class="astat-v" id="vu-unlocked">0</div><div class="astat-l">Vault Unlocked</div></div>
+          <div class="astat"><div class="astat-v" id="vu-locked">0</div><div class="astat-l">Not Yet Unlocked</div></div>
+        </div>
+        <!-- Search / filter -->
+        <div class="arow">
+          <input class="ainp ainp-lg" id="vu-search" placeholder="🔍 Search name / email..." oninput="renderVaultUnlock()" style="flex:1;min-width:180px;">
+          <select class="ainp" style="width:145px;" id="vu-filter" onchange="renderVaultUnlock()">
+            <option value="">All Users</option>
+            <option value="locked">🔒 Locked Only</option>
+            <option value="unlocked">🔓 Unlocked Only</option>
+          </select>
+          <button class="abtn abtn-g" onclick="renderVaultUnlock()">🔄 Refresh</button>
+        </div>
+        <!-- Bulk actions -->
+        <div class="acard" style="margin-bottom:.9rem;">
+          <h3>⚡ Bulk Actions</h3>
+          <div style="display:flex;gap:.7rem;flex-wrap:wrap;margin-top:.6rem;">
+            <button class="abtn abtn-g" onclick="bulkUnlockAll()">🔓 Unlock ALL Users</button>
+            <button class="abtn abtn-r" onclick="bulkLockAll()">🔒 Lock ALL Free Users</button>
+          </div>
+          <div style="color:rgba(255,255,255,.35);font-size:.74rem;margin-top:.55rem;">⚠️ Bulk unlock grants Vault access to every registered user immediately.</div>
+        </div>
+        <!-- User list -->
+        <div id="vu-list"></div>
+      </div>
+
       <!-- DEPARTMENTS -->
       <div class="asec" id="asec-departments">
         <div class="ah"><h2>🏢 Department Management</h2><p>Assign staff to departments — each department gets a full working dashboard</p></div>
@@ -436,14 +468,43 @@
     <h2 class="st">Track Your <span>Financial Journey</span></h2>
     <div class="d-grid" style="margin-top:1.8rem;">
       <div class="d-sidebar">
-        <div class="pc"><h4> Grow Phase</h4><div class="pb-w"><div class="pb" id="grow-bar" style="width:40%"></div></div><div class="pp" id="grow-pct">40% Complete</div><button onclick="openPhase('grow')" style="display:block;width:100%;margin-top:.7rem;background:var(--green);color:#fff;border:none;padding:.55rem;border-radius:50px;font-weight:700;font-size:.82rem;cursor:pointer;font-family:inherit;">📖 View Phase Dashboard →</button></div>
-        <div class="pc"><h4> Multiply Phase</h4><div class="pb-w"><div class="pb" id="mul-bar" style="width:0%;background:var(--gold)"></div></div><div class="pp" id="mul-pct">Locked</div><div class="lk-msg" id="mul-lk">🔒 Complete Grow to 80%</div><button onclick="openPhase('multiply')" style="display:block;width:100%;margin-top:.7rem;background:var(--gold);color:var(--ch);border:none;padding:.55rem;border-radius:50px;font-weight:700;font-size:.82rem;cursor:pointer;font-family:inherit;">📖 View Phase Dashboard →</button></div>
-        <div class="pc"><h4> Succeed Phase</h4><div class="pb-w"><div class="pb" id="suc-bar" style="width:0%;background:var(--gd)"></div></div><div class="pp" id="suc-pct">Locked</div><div class="lk-msg" id="suc-lk">🔒 Requires Vault unlock</div>
+        <!-- GROW -->
+        <div class="pc">
+          <div class="pc-phase-label" style="color:var(--green);font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.15rem;">Phase 1 · Always Free</div>
+          <h4> Grow Phase</h4>
+          <div class="pb-w"><div class="pb" id="grow-bar" style="width:40%"></div></div>
+          <div class="pp" id="grow-pct">40% Complete</div>
+          <button onclick="openPhase('grow')" style="display:block;width:100%;margin-top:.7rem;background:var(--green);color:#fff;border:none;padding:.55rem;border-radius:50px;font-weight:700;font-size:.82rem;cursor:pointer;font-family:inherit;">📖 View Phase Dashboard →</button>
+        </div>
+        <!-- MULTIPLY -->
+        <div class="pc">
+          <div class="pc-phase-label" style="color:var(--gold);font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.15rem;">Phase 2 · Premium</div>
+          <h4> Multiply Phase</h4>
+          <div class="pb-w"><div class="pb" id="mul-bar" style="width:0%;background:var(--gold)"></div></div>
+          <div class="pp" id="mul-pct">Locked</div>
+          <div class="lk-msg" id="mul-lk">🔒 Unlock Vault to access</div>
+          <button onclick="openPhase('multiply')" style="display:block;width:100%;margin-top:.7rem;background:var(--gold);color:var(--ch);border:none;padding:.55rem;border-radius:50px;font-weight:700;font-size:.82rem;cursor:pointer;font-family:inherit;">📖 View Phase Dashboard →</button>
+        </div>
+        <!-- SUCCEED -->
+        <div class="pc">
+          <div class="pc-phase-label" style="color:var(--gd);font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.15rem;">Phase 3 · Premium</div>
+          <h4> Succeed Phase</h4>
+          <div class="pb-w"><div class="pb" id="suc-bar" style="width:0%;background:var(--gd)"></div></div>
+          <div class="pp" id="suc-pct">Locked</div>
+          <div class="lk-msg" id="suc-lk">🔒 Requires Vault unlock</div>
           <button onclick="openPhase('succeed')" style="display:block;width:100%;margin-top:.7rem;background:var(--gd);color:#fff;border:none;padding:.55rem;border-radius:50px;font-weight:700;font-size:.82rem;cursor:pointer;font-family:inherit;">📖 View Phase Dashboard →</button>
           <button class="ulk-btn" id="ulk-btn" onclick="openPay()">🔐 Unlock The Vault — $7.65</button>
           <div class="ins-badge" id="ins-badge" style="display:none;">⭐ INSIDER — Full Access</div>
         </div>
-        <div class="pc"><h4> Legacy Phase</h4><div class="pb-w"><div class="pb" id="leg-bar" style="width:0%;background:linear-gradient(90deg,#6b3fa0,#9b59b6)"></div></div><div class="pp" id="leg-pct">Locked</div><div class="lk-msg">🔒 Requires Vault unlock</div><button onclick="openPhase('legacy')" style="display:block;width:100%;margin-top:.7rem;background:linear-gradient(135deg,#3b1f5e,#6b3fa0);color:#fff;border:none;padding:.55rem;border-radius:50px;font-weight:700;font-size:.82rem;cursor:pointer;font-family:inherit;">📖 View Phase Dashboard →</button></div>
+        <!-- LEGACY -->
+        <div class="pc">
+          <div class="pc-phase-label" style="color:#9b59b6;font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.15rem;">Phase 4 · Premium</div>
+          <h4> Legacy Phase</h4>
+          <div class="pb-w"><div class="pb" id="leg-bar" style="width:0%;background:linear-gradient(90deg,#6b3fa0,#9b59b6)"></div></div>
+          <div class="pp" id="leg-pct">Locked</div>
+          <div class="lk-msg">🔒 Requires Vault unlock</div>
+          <button onclick="openPhase('legacy')" style="display:block;width:100%;margin-top:.7rem;background:linear-gradient(135deg,#3b1f5e,#6b3fa0);color:#fff;border:none;padding:.55rem;border-radius:50px;font-weight:700;font-size:.82rem;cursor:pointer;font-family:inherit;">📖 View Phase Dashboard →</button>
+        </div>
       </div>
       <div>
         <div style="background:var(--cream);border-radius:18px;padding:1.8rem;border:1px solid rgba(0,0,0,.06);margin-bottom:1.3rem;">
@@ -821,13 +882,14 @@
     <div class="pay-steps" id="pay-steps-box" style="display:none;">
       <div class="ps-item"><div class="ps-num">1</div>Copy the wallet account number above</div>
       <div class="ps-item"><div class="ps-num">2</div>Go to any mobile money agent or app</div>
-      <div class="ps-item"><div class="ps-num">3</div>Send the exact amount to the account number</div>
-      <div class="ps-item"><div class="ps-num">4</div>Enter your payment reference below and confirm</div>
+      <div class="ps-item"><div class="ps-num">3</div>Send the exact amount shown to the account number</div>
+      <div class="ps-item"><div class="ps-num">4</div>Enter your name and transaction reference below then submit</div>
     </div>
     <div id="pay-confirm-section" style="display:none;">
+      <div class="pay-confirm-header">✍️ Confirm Your Payment</div>
       <label style="font-weight:600;font-size:.82rem;display:block;margin-bottom:.35rem;">Your Name (as sender)</label>
       <input class="pay-ref-input" type="text" id="pay-sender-name" placeholder="Full name used when sending" oninput="liveDetect()">
-      <label style="font-weight:600;font-size:.82rem;display:block;margin-bottom:.35rem;margin-top:.4rem;">Transaction / Receipt Reference</label>
+      <label style="font-weight:600;font-size:.82rem;display:block;margin-bottom:.35rem;margin-top:.75rem;">Transaction / Receipt Reference</label>
       <input class="pay-ref-input" type="text" id="pay-ref" placeholder="e.g. AIRTL20260417XXXXX" oninput="liveDetect()">
       <!-- PAYMENT DETECTOR -->
       <div class="pay-detector" id="pay-detector" style="display:none;">
@@ -838,7 +900,7 @@
         <div class="det-row"><div class="det-dot det-dot-idle" id="det-ref-dot"></div><span class="det-lbl">Reference #</span><span class="det-val" id="det-ref-val">—</span></div>
         <div class="det-row"><div class="det-dot det-dot-idle" id="det-status-dot"></div><span class="det-lbl">Status</span><span class="det-val" id="det-status-val">Waiting for details...</span></div>
       </div>
-      <button class="btn-gold" onclick="confirmPayment()">✅ I Have Sent the Money — Submit for Confirmation →</button>
+      <button class="btn-gold" style="width:100%;margin-top:.9rem;" onclick="confirmPayment()">✅ I Have Sent the Money — Submit for Confirmation →</button>
     </div>
     <div class="pay-confirm-box" id="pay-success-box">
       <p>🎉 <strong>Payment confirmed!</strong> Your GMS Insider access has been activated. Welcome to the Vault! Refreshing your dashboard...</p>

@@ -162,11 +162,11 @@ function admGo(name){
   document.querySelectorAll('.asec').forEach(el=>el.classList.remove('on'));
   document.querySelectorAll('.adm-sb-item').forEach(el=>el.classList.remove('on'));
   document.getElementById('asec-'+name).classList.add('on');
-  const order=['dashboard','users','wallet','transactions','transfer','feedback','payconfirm','departments','social','roadmap']; // dept dashboard auto-renders when dept section opens
+  const order=['dashboard','users','wallet','transactions','transfer','feedback','payconfirm','vaultunlock','departments','social','roadmap'];
   const idx=order.indexOf(name);
   if(idx>=0) document.querySelectorAll('.adm-sb-item')[idx].classList.add('on');
   document.getElementById('adm-sb').classList.remove('on');
-  const renders={dashboard:renderDash,users:renderUsers,wallet:renderWallet,transactions:renderTx,transfer:renderTransfer,feedback:renderTickets,payconfirm:renderPayConfirm,departments:()=>{renderDepts();},social:renderSocial,roadmap:renderKanban};
+  const renders={dashboard:renderDash,users:renderUsers,wallet:renderWallet,transactions:renderTx,transfer:renderTransfer,feedback:renderTickets,payconfirm:renderPayConfirm,vaultunlock:renderVaultUnlock,departments:()=>{renderDepts();},social:renderSocial,roadmap:renderKanban};
   if(renders[name]) renders[name]();
 }
 
@@ -1131,8 +1131,111 @@ function adminLock(txRef){
 }
 
 // ============================================================
+// ADMIN — VAULT UNLOCK MANAGER
+// ============================================================
+function renderVaultUnlock(){
+  const q=(document.getElementById('vu-search')||{}).value||'';
+  const filt=(document.getElementById('vu-filter')||{}).value||'';
+  let users=DB.users;
+  if(q){const lq=q.toLowerCase();users=users.filter(u=>(u.name||'').toLowerCase().includes(lq)||(u.email||'').toLowerCase().includes(lq));}
+  if(filt==='locked') users=users.filter(u=>!u.isPremium);
+  if(filt==='unlocked') users=users.filter(u=>u.isPremium);
+  const all=DB.users;
+  const el1=document.getElementById('vu-total-users');if(el1)el1.textContent=all.length;
+  const el2=document.getElementById('vu-unlocked');if(el2)el2.textContent=all.filter(u=>u.isPremium).length;
+  const el3=document.getElementById('vu-locked');if(el3)el3.textContent=all.filter(u=>!u.isPremium).length;
+  const list=document.getElementById('vu-list');if(!list)return;
+  if(users.length===0){list.innerHTML='<div style="color:rgba(255,255,255,.35);text-align:center;padding:2rem;">No users match that filter.</div>';return;}
+  const cn={ZM:'🇿🇲',KE:'🇰🇪',NG:'🇳🇬',ZA:'🇿🇦',TZ:'🇹🇿',GH:'🇬🇭',MW:'🇲🇼',ZW:'🇿🇼'};
+  list.innerHTML=users.map((u,i)=>{
+    const flag=cn[u.country]||'🌍';
+    const isPrem=u.isPremium;
+    return `<div class="vu-user-card">
+      <div class="vu-user-info">
+        <div class="vu-avatar">${(u.name||'?')[0].toUpperCase()}</div>
+        <div>
+          <div class="vu-name">${u.name||'Unknown'} ${isPrem?'<span class="bdg by">⭐ INSIDER</span>':'<span class="bdg bgr">🔒 Locked</span>'}</div>
+          <div class="vu-meta">${u.email||'—'} · ${flag} ${u.country||'—'} · Age ${u.age||'—'} · Joined ${u.joined||'—'}</div>
+        </div>
+      </div>
+      <div class="vu-actions">
+        ${!isPrem?`<button class="abtn abtn-g" onclick="vaultGrant('${u.email}')">🔓 Unlock Vault</button>`:''}
+        ${isPrem?`<button class="abtn abtn-r" onclick="vaultRevoke('${u.email}')">🔒 Revoke Access</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function vaultGrant(email){
+  const users=DB.users;
+  const idx=users.findIndex(u=>u.email===email||u.contact===email);
+  if(idx===-1){toast('User not found','err');return;}
+  users[idx].isPremium=true;
+  DB.users=users;
+  // If this is currently logged-in user, update live
+  if(CU&&(CU.email===email||CU.contact===email)){
+    CU.isPremium=true;isPrem=true;
+    sessionStorage.setItem('gms_sess',JSON.stringify(CU));
+    updateDash();
+  }
+  // Log a courtesy transaction record if none exists
+  const already=DB.txns.some(t=>(t.email===email||t.user===users[idx].name)&&t.status==='completed');
+  if(!already){
+    const c=users[idx].country||'ZM';
+    const la=LA[c]||LA['ZM'];
+    DB.txns=[...DB.txns,{ref:'VU-'+Date.now().toString().slice(-7),user:users[idx].name,email:email,country:c,local:la.amt,localCur:la.lbl.split('·')[0].trim(),provider:'Admin Grant',usd:0,status:'completed',date:new Date().toISOString().split('T')[0],senderRef:'ADMIN-GRANT',senderName:users[idx].name}];
+  }
+  renderVaultUnlock();renderDash();
+  toast('🔓 Vault unlocked for '+users[idx].name+'!','ok');
+}
+
+function vaultRevoke(email){
+  if(!confirm('Revoke Vault access for this user?'))return;
+  const users=DB.users;
+  const idx=users.findIndex(u=>u.email===email||u.contact===email);
+  if(idx===-1){toast('User not found','err');return;}
+  users[idx].isPremium=false;
+  DB.users=users;
+  if(CU&&(CU.email===email||CU.contact===email)){
+    CU.isPremium=false;isPrem=false;
+    sessionStorage.setItem('gms_sess',JSON.stringify(CU));
+    updateDash();
+  }
+  renderVaultUnlock();renderDash();
+  toast('🔒 Access revoked for '+users[idx].name,'err');
+}
+
+function bulkUnlockAll(){
+  if(!confirm('Unlock The Vault for ALL '+DB.users.length+' users? This cannot be undone easily.'))return;
+  const users=DB.users;
+  users.forEach(u=>{u.isPremium=true;});
+  DB.users=users;
+  if(CU){CU.isPremium=true;isPrem=true;sessionStorage.setItem('gms_sess',JSON.stringify(CU));updateDash();}
+  renderVaultUnlock();renderDash();
+  toast('🔓 Vault unlocked for all '+users.length+' users!','ok');
+}
+
+function bulkLockAll(){
+  if(!confirm('Lock ALL non-paying (free) users? Premium users who paid will remain unlocked.'))return;
+  const users=DB.users;
+  const txns=DB.txns;
+  users.forEach(u=>{
+    const hasPaid=txns.some(t=>t.status==='completed'&&(t.email===u.email||t.user===u.name)&&t.provider!=='Admin Grant');
+    if(!hasPaid) u.isPremium=false;
+  });
+  DB.users=users;
+  if(CU){
+    const me=users.find(u=>u.email===CU.email);
+    if(me){CU.isPremium=me.isPremium;isPrem=me.isPremium;sessionStorage.setItem('gms_sess',JSON.stringify(CU));updateDash();}
+  }
+  renderVaultUnlock();renderDash();
+  toast('🔒 Free users locked. Paid users kept.','ok');
+}
+
+// ============================================================
 // HOME FEEDBACK (inline on main page)
 // ============================================================
+
 function switchHomeFbTab(tab){
   document.getElementById('hfbt-feedback').classList.toggle('on',tab==='feedback');
   document.getElementById('hfbt-mentor').classList.toggle('on',tab==='mentor');
@@ -1737,3 +1840,4 @@ function scrollToHome(){
 
 document.getElementById('pay-ov').addEventListener('click',function(e){if(e.target===this)closePay();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeTopic();closePay();}});
+

@@ -1,139 +1,215 @@
 // ============================================================
-// FIREBASE — REAL-TIME CROSS-DEVICE SYNC
+// ██████╗ ███████╗ █████╗ ██╗         ██████╗██████╗ 
+// ██╔══██╗██╔════╝██╔══██╗██║        ██╔════╝██╔══██╗
+// ██████╔╝█████╗  ███████║██║        ██║     ██║  ██║
+// ██╔══██╗██╔══╝  ██╔══██║██║        ██║     ██║  ██║
+// ██║  ██║███████╗██║  ██║███████╗   ╚██████╗██████╔╝
+// GMS CROSS-DEVICE CLOUD SYNC — JSONBin.io backend
+// Every user signup + every payment request is written to
+// the cloud so the admin can see them from ANY device.
 // ============================================================
-// ⚠️  SETUP (5 min, free forever):
-// 1. Go to https://console.firebase.google.com
-// 2. Create project → name it "gms-platform"
-// 3. Add Web App → copy config below
-// 4. Firestore Database → Create → Start in TEST MODE
-// ⚠️  Replace ALL values in _FBCFG with your own config:
+//
+// ⚡ ONE-TIME SETUP (2 minutes, 100% free, no credit card):
+//
+//   STEP 1 → Go to https://jsonbin.io  →  Click "Sign Up" (free)
+//   STEP 2 → After login, click your profile icon → "API Keys"
+//             Copy your "Secret Access Key"
+//   STEP 3 → Paste it below as GMS_API_KEY
+//   STEP 4 → Save this file — done. Works instantly on all devices.
+//
+// Free tier: 10,000 requests/month — more than enough for GMS.
+// ============================================================
 
-const _FBCFG = {
-  apiKey: "REPLACE_WITH_YOUR_API_KEY",
-  authDomain: "REPLACE.firebaseapp.com",
-  projectId: "REPLACE_WITH_YOUR_PROJECT_ID",
-  storageBucket: "REPLACE.appspot.com",
-  messagingSenderId: "REPLACE_WITH_SENDER_ID",
-  appId: "REPLACE_WITH_APP_ID"
-};
+const GMS_API_KEY  = '$2a$10$azNev.AYpS.cWxvJams1tehljIvXis3u.7/wcPrHJHy0Gl.BccInO';
+// e.g. '$2b$10$abc123...'  (starts with $2b)
 
-let _fbDb = null, _fbReady = false;
+const GMS_BIN_USERS = '$2a$10$E4QBq9ovIaRWE5rSmqSUTOAMV0e5VICb31aLQskeSfrhz/mIYpSom';   // created automatically on first run
+const GMS_BIN_TXNS  = '$2a$10$E4QBq9ovIaRWE5rSmqSUTOAMV0e5VICb31aLQskeSfrhz/mIYpSom';    // created automatically on first run
 
-async function _loadScript(src) {
-  return new Promise((res, rej) => {
-    if (document.querySelector('script[src="' + src + '"]')) { res(); return; }
-    const s = document.createElement('script');
-    s.src = src; s.onload = res; s.onerror = rej;
-    document.head.appendChild(s);
+// Internal: stores bin IDs after auto-creation
+const _BINS_KEY = 'gms_cloud_bins';
+
+let _cloudReady = false;
+let _cloudBins  = JSON.parse(localStorage.getItem(_BINS_KEY) || '{}');
+
+// ---------- Core cloud helpers ----------
+
+async function _cloudGet(binId) {
+  const r = await fetch(`$2a$10$E4QBq9ovIaRWE5rSmqSUTOAMV0e5VICb31aLQskeSfrhz/mIYpSom', {
+    headers: { 'X-Master-Key': GMS_API_KEY }
   });
+  if (!r.ok) throw new Error('GET failed: ' + r.status);
+  const j = await r.json();
+  return j.record;
 }
 
-async function _initFirebase() {
-  try {
-    if (typeof firebase === 'undefined') {
-      await _loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
-      await _loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js');
-    }
-    if (!firebase.apps.length) firebase.initializeApp(_FBCFG);
-    _fbDb = firebase.firestore();
-    _fbReady = true;
-    console.log('[GMS] Firebase connected — cross-device sync ACTIVE');
-    _syncQueued();
-  } catch (err) {
-    console.warn('[GMS] Firebase unavailable — localStorage only', err);
-  }
+async function _cloudSet(binId, data) {
+  const r = await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Master-Key': GMS_API_KEY },
+    body: JSON.stringify(data)
+  });
+  if (!r.ok) throw new Error('PUT failed: ' + r.status);
+  return await r.json();
 }
 
-// Write a new user registration to Firestore
-async function _fbWriteUser(u) {
-  if (!_fbReady || !_fbDb) {
-    const q = JSON.parse(localStorage.getItem('gms_fbq') || '[]');
-    q.push(u); localStorage.setItem('gms_fbq', JSON.stringify(q));
+async function _cloudCreate(name, data) {
+  const r = await fetch('https://api.jsonbin.io/v3/b', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Master-Key': GMS_API_KEY,
+      'X-Bin-Name': name,
+      'X-Bin-Private': 'true'
+    },
+    body: JSON.stringify(data)
+  });
+  if (!r.ok) throw new Error('CREATE failed: ' + r.status);
+  const j = await r.json();
+  return j.metadata.id;
+}
+
+// ---------- Init: auto-create bins if missing ----------
+
+async function _cloudInit() {
+  if (GMS_API_KEY === 'PASTE_YOUR_JSONBIN_SECRET_KEY_HERE') {
+    console.warn('[GMS] Cloud sync OFF — paste your JSONBin API key in script.js');
     return;
   }
   try {
-    const id = (u.email || u.contact || '').replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
-    await _fbDb.collection('gms_users').doc(id).set({
-      name: u.name || '', email: u.email || u.contact || '',
-      contact: u.contact || u.email || '', country: u.country || '',
-      age: u.age || 0, ageGroup: u.ageGroup || '',
-      isPremium: u.isPremium || false,
-      joined: u.joined || new Date().toISOString().split('T')[0],
-      createdAt: new Date().toISOString()
-    });
-  } catch (err) {
-    console.warn('[GMS] Firestore write failed', err);
-    const q = JSON.parse(localStorage.getItem('gms_fbq') || '[]');
-    q.push(u); localStorage.setItem('gms_fbq', JSON.stringify(q));
+    // Create users bin if not exists
+    if (!_cloudBins.users) {
+      _cloudBins.users = await _cloudCreate('gms_users', []);
+      localStorage.setItem(_BINS_KEY, JSON.stringify(_cloudBins));
+      console.log('[GMS] Created users bin:', _cloudBins.users);
+    }
+    // Create txns bin if not exists
+    if (!_cloudBins.txns) {
+      _cloudBins.txns = await _cloudCreate('gms_txns', []);
+      localStorage.setItem(_BINS_KEY, JSON.stringify(_cloudBins));
+      console.log('[GMS] Created txns bin:', _cloudBins.txns);
+    }
+    _cloudReady = true;
+    console.log('[GMS] ✅ Cloud sync ACTIVE — cross-device mode ON');
+    // Flush any queued local-only items
+    await _cloudFlushQueue();
+  } catch(e) {
+    console.warn('[GMS] Cloud init failed:', e.message);
   }
 }
 
-// Write a payment/vault request to Firestore so admin sees it cross-device
-async function _fbWriteTx(tx) {
-  if (!_fbReady || !_fbDb) return;
-  try {
-    await _fbDb.collection('gms_txns').doc(tx.ref).set({ ...tx, createdAt: new Date().toISOString() });
-  } catch (err) { console.warn('[GMS] Firestore tx write failed', err); }
+// ---------- Users ----------
+
+async function _cloudGetUsers() {
+  if (!_cloudReady) return null;
+  try { return await _cloudGet(_cloudBins.users); }
+  catch(e) { console.warn('[GMS] cloud getUsers failed', e); return null; }
 }
 
-// Update a transaction status in Firestore
-async function _fbUpdateTx(ref, status) {
-  if (!_fbReady || !_fbDb) return;
+async function _cloudSaveUser(u) {
+  if (!_cloudReady) { _cloudQueue('user', u); return; }
   try {
-    await _fbDb.collection('gms_txns').doc(ref).update({ status, updatedAt: new Date().toISOString() });
-  } catch (err) { console.warn('[GMS] Firestore tx update failed', err); }
+    const users = (await _cloudGetUsers()) || [];
+    // Avoid duplicates by email/contact
+    const exists = users.find(x => x.email === (u.email||u.contact) || x.contact === (u.contact||u.email));
+    if (!exists) {
+      users.push({ ...u, _savedAt: new Date().toISOString() });
+      await _cloudSet(_cloudBins.users, users);
+    }
+  } catch(e) { console.warn('[GMS] cloud saveUser failed', e); _cloudQueue('user', u); }
 }
 
-// Update user premium status in Firestore
-async function _fbUpdatePremium(emailOrContact, isPremium) {
-  if (!_fbReady || !_fbDb) return;
+async function _cloudDeleteUser(emailOrContact) {
+  if (!_cloudReady) return;
   try {
-    const s1 = await _fbDb.collection('gms_users').where('email', '==', emailOrContact).get();
-    const s2 = await _fbDb.collection('gms_users').where('contact', '==', emailOrContact).get();
-    for (const d of [...s1.docs, ...s2.docs]) await d.ref.update({ isPremium });
-  } catch (err) { console.warn('[GMS] Premium update failed', err); }
+    let users = (await _cloudGetUsers()) || [];
+    users = users.filter(u => u.email !== emailOrContact && u.contact !== emailOrContact);
+    await _cloudSet(_cloudBins.users, users);
+  } catch(e) { console.warn('[GMS] cloud deleteUser failed', e); }
 }
 
-// Delete a user from Firestore
-async function _fbDeleteUser(emailOrContact) {
-  if (!_fbReady || !_fbDb) return;
+async function _cloudUpdatePremium(emailOrContact, isPremium) {
+  if (!_cloudReady) return;
   try {
-    const s1 = await _fbDb.collection('gms_users').where('email', '==', emailOrContact).get();
-    const s2 = await _fbDb.collection('gms_users').where('contact', '==', emailOrContact).get();
-    for (const d of [...s1.docs, ...s2.docs]) await d.ref.delete();
-  } catch (err) { console.warn('[GMS] Delete user failed', err); }
+    const users = (await _cloudGetUsers()) || [];
+    let changed = false;
+    users.forEach(u => {
+      if (u.email === emailOrContact || u.contact === emailOrContact) {
+        u.isPremium = isPremium; changed = true;
+      }
+    });
+    if (changed) await _cloudSet(_cloudBins.users, users);
+  } catch(e) { console.warn('[GMS] cloud updatePremium failed', e); }
 }
 
-// Fetch ALL users from Firestore (admin use — cross device)
-async function _fbFetchAllUsers() {
-  if (!_fbReady || !_fbDb) return null;
-  try {
-    const snap = await _fbDb.collection('gms_users').orderBy('createdAt', 'desc').get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch (err) { console.warn('[GMS] Fetch users failed', err); return null; }
+// ---------- Transactions / Payment Requests ----------
+
+async function _cloudGetTxns() {
+  if (!_cloudReady) return null;
+  try { return await _cloudGet(_cloudBins.txns); }
+  catch(e) { console.warn('[GMS] cloud getTxns failed', e); return null; }
 }
 
-// Fetch ALL transactions from Firestore (admin use — cross device)
-async function _fbFetchAllTxns() {
-  if (!_fbReady || !_fbDb) return null;
+async function _cloudSaveTx(tx) {
+  if (!_cloudReady) { _cloudQueue('tx', tx); return; }
   try {
-    const snap = await _fbDb.collection('gms_txns').orderBy('createdAt', 'desc').get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch (err) { console.warn('[GMS] Fetch txns failed', err); return null; }
+    const txns = (await _cloudGetTxns()) || [];
+    const exists = txns.find(t => t.ref === tx.ref);
+    if (!exists) {
+      txns.push({ ...tx, _savedAt: new Date().toISOString() });
+      await _cloudSet(_cloudBins.txns, txns);
+    }
+  } catch(e) { console.warn('[GMS] cloud saveTx failed', e); _cloudQueue('tx', tx); }
 }
 
-// Retry queued writes
-async function _syncQueued() {
+async function _cloudUpdateTxStatus(ref, status) {
+  if (!_cloudReady) return;
   try {
-    const q = JSON.parse(localStorage.getItem('gms_fbq') || '[]');
-    if (!q.length) return;
-    for (const u of q) await _fbWriteUser(u);
-    localStorage.removeItem('gms_fbq');
-  } catch (e) {}
+    const txns = (await _cloudGetTxns()) || [];
+    const t = txns.find(x => x.ref === ref);
+    if (t) { t.status = status; await _cloudSet(_cloudBins.txns, txns); }
+  } catch(e) { console.warn('[GMS] cloud updateTx failed', e); }
 }
 
-// Initialise Firebase immediately
-_initFirebase();
+// ---------- Offline queue (retry when back online) ----------
+
+function _cloudQueue(type, data) {
+  const q = JSON.parse(localStorage.getItem('gms_cq') || '[]');
+  q.push({ type, data, ts: Date.now() });
+  localStorage.setItem('gms_cq', JSON.stringify(q));
+}
+
+async function _cloudFlushQueue() {
+  const q = JSON.parse(localStorage.getItem('gms_cq') || '[]');
+  if (!q.length) return;
+  let remaining = [];
+  for (const item of q) {
+    try {
+      if (item.type === 'user') await _cloudSaveUser(item.data);
+      else if (item.type === 'tx') await _cloudSaveTx(item.data);
+    } catch(e) { remaining.push(item); }
+  }
+  localStorage.setItem('gms_cq', JSON.stringify(remaining));
+}
+
+// ---------- Status indicator ----------
+
+function _cloudStatusBadge() {
+  const el = document.getElementById('cloud-status');
+  if (!el) return;
+  if (_cloudReady) {
+    el.innerHTML = '<span style="color:#4ade80;font-size:.78rem;">🌐 Cross-device sync ON</span>';
+  } else {
+    el.innerHTML = '<span style="color:#fbbf24;font-size:.78rem;">💾 Local only (set API key)</span>';
+  }
+}
+
+// Start cloud init immediately
+_cloudInit().then(_cloudStatusBadge);
+
+// ============================================================
+// END OF CLOUD LAYER
+// ============================================================
 
 // ============================================================
 // SECURE ADMIN CREDENTIALS — encoded, never plain text in DOM
@@ -260,8 +336,8 @@ function handleRegister(){
   const nu={name:fn+' '+ln,email:ct,contact:ct,password:pw,country:cy,age:ag,ageGroup:ag<=30?'18-30':'30-50',isPremium:false,joined:new Date().toISOString().split('T')[0]};
   DB.users=[...users,nu];
   CU={...nu};
-  // Cross-device: write to Firebase so admin sees from any device
-  _fbWriteUser(nu);
+  // ✅ Write to cloud — admin sees this from ANY device
+  _cloudSaveUser(nu);
   sessionStorage.setItem('gms_sess',JSON.stringify(CU));
   document.getElementById('auth-gate').style.display='none';
   boot();
@@ -336,17 +412,16 @@ function renderDash(){
 // ============================================================
 async function renderUsers(){
   const tbody=document.getElementById('u-tbody');
-  if(tbody) tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:rgba(255,255,255,.4);padding:1.5rem;">⏳ Loading from all devices...</td></tr>';
-  // Try Firebase first for cross-device data
-  let allUsers = null;
-  try { allUsers = await _fbFetchAllUsers(); } catch(e){}
-  if(!allUsers||allUsers.length===0){
-    allUsers = DB.users;
-  } else {
-    // Merge: add local-only users not yet in Firebase
-    const fbEmails = new Set(allUsers.map(u=>u.email||u.contact));
-    const localOnly = DB.users.filter(u=>!fbEmails.has(u.email||u.contact));
-    allUsers = [...allUsers,...localOnly];
+  if(tbody) tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:rgba(255,255,255,.4);padding:1.5rem;">⏳ Loading registered users from all devices...</td></tr>';
+  // Pull from cloud (sees ALL devices), fall back to local
+  let cloudUsers = null;
+  try { cloudUsers = await _cloudGetUsers(); } catch(e){}
+  let allUsers = DB.users;
+  if(cloudUsers && cloudUsers.length > 0){
+    // Merge: cloud is source of truth, add any local-only users not yet synced
+    const cloudEmails = new Set(cloudUsers.map(u=>u.email||u.contact));
+    const localOnly = DB.users.filter(u=>!cloudEmails.has(u.email||u.contact));
+    allUsers = [...cloudUsers, ...localOnly];
   }
   const q=(document.getElementById('u-search').value||'').toLowerCase();
   const fc=document.getElementById('u-fc').value;
@@ -358,8 +433,8 @@ async function renderUsers(){
   const total=users.length,pages=Math.max(1,Math.ceil(total/PG));
   if(uPage>=pages) uPage=pages-1;
   const sl=users.slice(uPage*PG,(uPage+1)*PG);
-  const src=_fbReady?'🌐 All devices (Firebase)':'💾 This device only';
-  const srcCol=_fbReady?'#4ade80':'#fbbf24';
+  const srcLabel = _cloudReady ? '🌐 All devices (cloud)' : '💾 This device only';
+  const srcColor = _cloudReady ? '#4ade80' : '#fbbf24';
   if(tbody) tbody.innerHTML=sl.map((u,i)=>`
     <tr>
       <td>${uPage*PG+i+1}</td>
@@ -370,16 +445,17 @@ async function renderUsers(){
       <td style="font-size:.75rem">${u.joined||'—'}</td>
       <td><button class="del-btn" onclick="delUser('${u.email||u.contact}')">🗑</button></td>
     </tr>`).join('');
-  let pg=`<span style="color:rgba(255,255,255,.4);font-size:.8rem;margin-right:.4rem;">${total} users · <span style="color:${srcCol};">${src}</span></span>`;
+  let pg=`<span style="color:rgba(255,255,255,.4);font-size:.8rem;margin-right:.4rem;">${total} users · <span style="color:${srcColor};">${srcLabel}</span></span>`;
   for(let i=0;i<pages;i++) pg+=`<button class="abtn ${i===uPage?'abtn-g':'abtn-gh'}" onclick="uPage=${i};renderUsers()" style="min-width:34px;padding:.38rem .6rem;">${i+1}</button>`;
   const pgEl=document.getElementById('u-pages');
   if(pgEl) pgEl.innerHTML=pg;
 }
 async function delUser(id){
-  if(!confirm('Delete this user permanently from all devices?'))return;
+  if(!confirm('Delete this user permanently from ALL devices?'))return;
   DB.users=DB.users.filter(u=>u.email!==id&&u.contact!==id);
-  await _fbDeleteUser(id);
-  renderUsers();renderDash();toast('User deleted from all devices','err');
+  await _cloudDeleteUser(id);
+  renderUsers();renderDash();
+  toast('User deleted from all devices','err');
 }
 
 // ============================================================
@@ -1055,8 +1131,8 @@ function confirmPayment(){
     senderRef:ref, senderName:sender
   };
   DB.txns = [...DB.txns, pendingTx];
-  // Cross-device: write to Firebase so admin sees this request from any device
-  _fbWriteTx(pendingTx);
+  // ✅ Write to cloud — admin sees this payment request from ANY device
+  _cloudSaveTx(pendingTx);
   // Show pending message
   document.getElementById('pay-success-box').innerHTML = `<p>⏳ <strong>Payment submitted for review!</strong> Your transaction reference <strong>${ref}</strong> has been received. Our admin team will verify and unlock your access within 1–24 hours. You will see your Insider badge once confirmed.</p>`;
   document.getElementById('pay-success-box').classList.add('on');
@@ -1211,17 +1287,23 @@ function selectMM(provider){
 // ADMIN — PAYMENT CONFIRMATIONS
 // ============================================================
 async function renderPayConfirm(){
-  // Pull fresh from Firebase if available (so admin sees requests from all devices)
-  if(_fbReady){
+  // Pull latest from cloud so admin sees requests from ALL user devices
+  if(_cloudReady){
     try{
-      const fbTxns = await _fbFetchAllTxns();
-      if(fbTxns && fbTxns.length>0){
-        // Merge Firebase txns into local DB (new ones from user devices)
+      const cloudTxns = await _cloudGetTxns();
+      if(cloudTxns && cloudTxns.length > 0){
         const existingRefs = new Set(DB.txns.map(t=>t.ref));
-        const newFbTxns = fbTxns.filter(t=>!existingRefs.has(t.ref));
-        if(newFbTxns.length>0) DB.txns=[...DB.txns,...newFbTxns];
+        const newOnes = cloudTxns.filter(t=>!existingRefs.has(t.ref));
+        if(newOnes.length > 0){
+          DB.txns = [...DB.txns, ...newOnes];
+        }
+        // Also update statuses from cloud (so admin changes reflect)
+        cloudTxns.forEach(ct=>{
+          const local = DB.txns.find(t=>t.ref===ct.ref);
+          if(local && local.status !== ct.status) local.status = ct.status;
+        });
       }
-    }catch(e){}
+    }catch(e){ console.warn('[GMS] Could not load cloud txns for admin panel',e); }
   }
   const fs = (document.getElementById('pc-fs')||{}).value||'';
   let txns = DB.txns.filter(t=>t.status==='pending_admin'||t.status==='completed'||t.status==='rejected');
@@ -1265,14 +1347,13 @@ async function adminUnlock(txRef){
   if(!tx){toast('Transaction not found','err');return;}
   tx.status='completed';
   DB.txns=txns;
-  // Update in Firebase (cross-device)
-  await _fbUpdateTx(txRef,'completed');
+  // ✅ Sync to cloud — user's device sees the unlock
+  await _cloudUpdateTxStatus(txRef,'completed');
+  if(tx.email) await _cloudUpdatePremium(tx.email,true);
   // Unlock the user locally
   const users=DB.users;
   const idx=users.findIndex(u=>u.email===tx.email||u.name===tx.user);
   if(idx>-1){users[idx].isPremium=true;DB.users=users;}
-  // Update user premium in Firebase
-  if(tx.email) await _fbUpdatePremium(tx.email,true);
   // If this is the currently logged-in user, update session live
   if(CU&&(CU.email===tx.email||CU.name===tx.user)){
     CU.isPremium=true;isPrem=true;
@@ -1289,7 +1370,7 @@ async function adminReject(txRef){
   const tx=txns.find(t=>t.ref===txRef);
   if(tx) tx.status='rejected';
   DB.txns=txns;
-  await _fbUpdateTx(txRef,'rejected');
+  await _cloudUpdateTxStatus(txRef,'rejected');
   renderPayConfirm();
   toast('❌ Payment rejected','err');
 }
@@ -1304,8 +1385,8 @@ async function adminLock(txRef){
     const idx=users.findIndex(u=>u.email===tx.email||u.name===tx.user);
     if(idx>-1){users[idx].isPremium=false;DB.users=users;}
     DB.txns=txns;
-    await _fbUpdateTx(txRef,'rejected');
-    if(tx.email) await _fbUpdatePremium(tx.email,false);
+    await _cloudUpdateTxStatus(txRef,'rejected');
+    if(tx.email) await _cloudUpdatePremium(tx.email,false);
   }
   renderPayConfirm();renderDash();
   toast('🔒 Access revoked','err');
@@ -1353,8 +1434,7 @@ async function vaultGrant(email){
   if(idx===-1){toast('User not found','err');return;}
   users[idx].isPremium=true;
   DB.users=users;
-  // Update in Firebase (cross-device)
-  await _fbUpdatePremium(email,true);
+  await _cloudUpdatePremium(email,true);
   // If this is currently logged-in user, update live
   if(CU&&(CU.email===email||CU.contact===email)){
     CU.isPremium=true;isPrem=true;
@@ -1379,7 +1459,7 @@ async function vaultRevoke(email){
   if(idx===-1){toast('User not found','err');return;}
   users[idx].isPremium=false;
   DB.users=users;
-  await _fbUpdatePremium(email,false);
+  await _cloudUpdatePremium(email,false);
   if(CU&&(CU.email===email||CU.contact===email)){
     CU.isPremium=false;isPrem=false;
     sessionStorage.setItem('gms_sess',JSON.stringify(CU));

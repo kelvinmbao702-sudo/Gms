@@ -1017,32 +1017,7 @@ const PROV={ZM:['Airtel Money 🇿🇲','MTN Zambia 🇿🇲','Zamtel Kwacha �
 function selMMProv(el,name){selMM=name;document.querySelectorAll('.mm-opt').forEach(e=>e.classList.remove('sel'));el.classList.add('sel');}
 
 
-function processPay(){
-  if(!selMM){toast('Please select a mobile money provider','err');return;}
-  const phone=document.getElementById('pay-phone').value.trim();
-  if(!phone||phone.length<8){toast('Please enter a valid phone number','err');return;}
-  const btn=document.querySelector('.btn-gold');
-  btn.textContent='⏳ Processing...';btn.disabled=true;
-  toast('📱 STK push sent via '+selMM+' to '+phone+' — enter your PIN on your phone...','');
-  setTimeout(()=>{
-    isPrem=true;
-    if(CU){
-      CU.isPremium=true;
-      sessionStorage.setItem('gms_sess',JSON.stringify(CU));
-      const users=DB.users;
-      const idx=users.findIndex(u=>u.email===CU.email||u.contact===CU.contact);
-      if(idx>-1){users[idx].isPremium=true;DB.users=users;}
-      const c=CU.country||'ZM';
-      const la=LA[c]||LA.ZM;
-      const txns=DB.txns;
-      txns.push({ref:'TX-'+Date.now().toString().slice(-6),user:CU.name,country:c,local:la.amt,localCur:(la.lbl.split('·')[0]||'USD').trim(),provider:selMM,usd:7.65,status:'completed',date:new Date().toISOString().split('T')[0]});
-      DB.txns=txns;
-    }
-    closePay();updateDash();
-    toast('🎉 Payment confirmed via '+selMM+'! The Vault is unlocked. Welcome, Insider!','ok');
-    btn.textContent='Pay Now & Unlock →';btn.disabled=false;
-  },2800);
-}
+// [old processPay removed]
 
 // ============================================================
 // TOPIC MODAL
@@ -1126,21 +1101,7 @@ const WALLET_ACCOUNTS = {
   'InnBucks':      {num:'GMS-INB-263781234567', name:'GMS Platform · InnBucks · +263 78 123 4567'},
 };
 
-// ============================================================
-// PAYMENT — show wallet account after provider selected
-// ============================================================
-const _origBuildMM = window.buildMM;
-function buildMM(){
-  const loc = LOCAL_AMOUNTS[CU&&CU.country||'ZM']||LOCAL_AMOUNTS['ZM'];
-  const providers = loc.providers;
-  document.getElementById('mm-opts').innerHTML = providers.map(p=>
-    `<div class="mm-opt" onclick="selectMM('${p}')">${p}</div>`
-  ).join('');
-  document.getElementById('wallet-acct-box').style.display='none';
-  document.getElementById('pay-steps-box').style.display='none';
-  document.getElementById('pay-confirm-section').style.display='none';
-  document.getElementById('pay-success-box').classList.remove('on');
-}
+// [old buildMM removed — replaced by new auto-pay version above]
 
 function copyAcct(){
   const num = document.getElementById('pay-acct-num').textContent;
@@ -1148,32 +1109,7 @@ function copyAcct(){
     const ta=document.createElement('textarea');ta.value=num;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);toast('✅ Copied!','ok');
   });
 }
-function confirmPayment(){
-  const sender = document.getElementById('pay-sender-name').value.trim();
-  const ref = document.getElementById('pay-ref').value.trim();
-  const selectedProv = document.querySelector('.mm-opt.sel');
-  const provider = selectedProv ? selectedProv.textContent : '';
-  // Run detector
-  runPayDetector(sender, ref, provider);
-  if(!sender||!ref||!provider){toast('Please fill all fields and select a provider','err');return;}
-  const loc = LOCAL_AMOUNTS[CU&&CU.country||'ZM']||LOCAL_AMOUNTS['ZM'];
-  const txRef = 'TX-'+Date.now().toString().slice(-7);
-  // Save as pending_admin — waits for admin to confirm
-  const pendingTx = {
-    ref:txRef, user:CU.name||sender, email:CU.email||'', country:CU&&CU.country||'ZM',
-    local:loc.label, localCur:loc.cur, provider:provider,
-    usd:7.65, status:'pending_admin', date:new Date().toISOString().split('T')[0],
-    senderRef:ref, senderName:sender
-  };
-  DB.txns = [...DB.txns, pendingTx];
-  // Show pending message
-  document.getElementById('pay-success-box').innerHTML = `<p>⏳ <strong>Payment submitted for review!</strong> Your transaction reference <strong>${ref}</strong> has been received. Our admin team will verify and unlock your access within 1–24 hours. You will see your Insider badge once confirmed.</p>`;
-  document.getElementById('pay-success-box').classList.add('on');
-  document.getElementById('pay-success-box').style.background='#fefce8';
-  document.getElementById('pay-success-box').style.borderColor='#fde047';
-  document.getElementById('pay-confirm-section').style.display='none';
-  toast('⏳ Payment submitted! Admin will verify shortly.','');
-}
+// [old confirmPayment removed — replaced by new auto-pay version above]
 
 // ============================================================
 // FEEDBACK PAGE
@@ -1302,19 +1238,7 @@ function setDet(field, status, value){
   dot.className='det-dot det-dot-'+({'ok':'ok','warn':'warn','err':'err','idle':'idle'}[status]||'idle');
   val.textContent = value;
 }
-// Show detector when provider is selected
-const _origSelectMM = window.selectMM;
-function selectMM(provider){
-  document.querySelectorAll('.mm-opt').forEach(el=>el.classList.toggle('sel', el.textContent===provider));
-  const acct = WALLET_ACCOUNTS[provider]||{num:'GMS-2026-PLATFORM',name:'GMS Platform · '+provider};
-  document.getElementById('pay-acct-num').textContent = acct.num;
-  document.getElementById('pay-acct-name').textContent = acct.name;
-  document.getElementById('wallet-acct-box').style.display='block';
-  document.getElementById('pay-steps-box').style.display='flex';
-  document.getElementById('pay-steps-box').style.flexDirection='column';
-  document.getElementById('pay-confirm-section').style.display='block';
-  liveDetect();
-}
+// [old selectMM removed — replaced by new auto-pay version above]
 
 // ============================================================
 // ADMIN — PAYMENT CONFIRMATIONS
@@ -2116,6 +2040,4 @@ function scrollToHome(){
 
 document.getElementById('pay-ov').addEventListener('click',function(e){if(e.target===this)closePay();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeTopic();closePay();}});
-
-
 

@@ -1395,3 +1395,38 @@ nav{position:sticky;top:0;width:100%;z-index:999;display:flex;align-items:center
 }
 
 
+
+
+/* ============================================================
+   NEW PAYMENT FORM STYLES
+   ============================================================ */
+#pay-form .pay-ref-input,
+.pay-ref-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: .65rem .9rem;
+  border: 1.5px solid #d1d5db;
+  border-radius: .55rem;
+  font-size: .92rem;
+  outline: none;
+  transition: border .2s, box-shadow .2s;
+  background: #fff;
+  color: #111;
+}
+#pay-form .pay-ref-input:focus,
+.pay-ref-input:focus {
+  border-color: var(--gold2, #d97706);
+  box-shadow: 0 0 0 3px rgba(217,119,6,.13);
+}
+#gms-pay-btn {
+  transition: opacity .2s, transform .12s;
+}
+#gms-pay-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  filter: brightness(1.07);
+}
+#pay-prog-fill {
+  transition: width .6s ease;
+}
+
+

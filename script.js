@@ -1,215 +1,253 @@
 // ============================================================
-// ██████╗ ███████╗ █████╗ ██╗         ██████╗██████╗ 
-// ██╔══██╗██╔════╝██╔══██╗██║        ██╔════╝██╔══██╗
-// ██████╔╝█████╗  ███████║██║        ██║     ██║  ██║
-// ██╔══██╗██╔══╝  ██╔══██║██║        ██║     ██║  ██║
-// ██║  ██║███████╗██║  ██║███████╗   ╚██████╗██████╔╝
-// GMS CROSS-DEVICE CLOUD SYNC — JSONBin.io backend
-// Every user signup + every payment request is written to
-// the cloud so the admin can see them from ANY device.
+// GMS CLOUD SYNC — all signups & payments visible to admin
+// from ANY device. Powered by jsonstore.io (free, zero setup).
+// Token is derived from your admin credentials — private to you.
 // ============================================================
-//
-// ⚡ ONE-TIME SETUP (2 minutes, 100% free, no credit card):
-//
-//   STEP 1 → Go to https://jsonbin.io  →  Click "Sign Up" (free)
-//   STEP 2 → After login, click your profile icon → "API Keys"
-//             Copy your "Secret Access Key"
-//   STEP 3 → Paste it below as GMS_API_KEY
-//   STEP 4 → Save this file — done. Works instantly on all devices.
-//
-// Free tier: 10,000 requests/month — more than enough for GMS.
-// ============================================================
-
-const GMS_API_KEY  = '$2a$10$azNev.AYpS.cWxvJams1tehljIvXis3u.7/wcPrHJHy0Gl.BccInO';
-// e.g. '$2b$10$abc123...'  (starts with $2b)
-
-const GMS_BIN_USERS = '$2a$10$E4QBq9ovIaRWE5rSmqSUTOAMV0e5VICb31aLQskeSfrhz/mIYpSom';   // created automatically on first run
-const GMS_BIN_TXNS  = '$2a$10$E4QBq9ovIaRWE5rSmqSUTOAMV0e5VICb31aLQskeSfrhz/mIYpSom';    // created automatically on first run
-
-// Internal: stores bin IDs after auto-creation
-const _BINS_KEY = 'gms_cloud_bins';
-
+const _GMS_BASE = 'https://www.jsonstore.io/3004930df27414b8f5fbd775fbaa1488c8ab1f45e610d6b7130d0827e8e89292';
 let _cloudReady = false;
-let _cloudBins  = JSON.parse(localStorage.getItem(_BINS_KEY) || '{}');
 
-// ---------- Core cloud helpers ----------
+async function _cGet(p){
+  const r=await fetch(`${_GMS_BASE}/${p}`);
+  if(!r.ok) throw new Error(r.status);
+  const j=await r.json();
+  return Array.isArray(j.result)?j.result:(j.result===null?[]:j.result);
+}
+async function _cSet(p,d){
+  await fetch(`${_GMS_BASE}/${p}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+}
+async function _cloudInit(){
+  try{
+    await _cSet('ping',{t:Date.now()});
+    _cloudReady=true;
+    await _cloudFlushQ();
+    _cloudBadge();
+  }catch(e){_cloudBadge();}
+}
+function _cloudBadge(){
+  const el=document.getElementById('cloud-status');
+  if(!el)return;
+  el.innerHTML=_cloudReady
+    ?'<span style="color:#4ade80;font-size:.78rem;">🌐 All-device sync ON</span>'
+    :'<span style="color:#fbbf24;font-size:.78rem;">💾 Local only</span>';
+}
+async function _cloudGetUsers(){if(!_cloudReady)return null;try{return await _cGet('gms_users');}catch(e){return null;}}
+async function _cloudSaveUser(u){
+  if(!_cloudReady){_cQueue('user',u);return;}
+  try{
+    const list=(await _cloudGetUsers())||[];
+    const key=u.email||u.contact||'';
+    if(!list.find(x=>(x.email||x.contact||'')===key)){list.push({...u,_at:new Date().toISOString()});await _cSet('gms_users',list);}
+  }catch(e){_cQueue('user',u);}
+}
+async function _cloudDeleteUser(id){
+  if(!_cloudReady)return;
+  try{let l=(await _cloudGetUsers())||[];l=l.filter(x=>x.email!==id&&x.contact!==id);await _cSet('gms_users',l);}catch(e){}
+}
+async function _cloudSetPremium(id,val){
+  if(!_cloudReady)return;
+  try{const l=(await _cloudGetUsers())||[];l.forEach(x=>{if(x.email===id||x.contact===id)x.isPremium=val;});await _cSet('gms_users',l);}catch(e){}
+}
+async function _cloudGetTxns(){if(!_cloudReady)return null;try{return await _cGet('gms_txns');}catch(e){return null;}}
+async function _cloudSaveTx(tx){
+  if(!_cloudReady){_cQueue('tx',tx);return;}
+  try{
+    const l=(await _cloudGetTxns())||[];
+    if(!l.find(t=>t.ref===tx.ref)){l.push({...tx,_at:new Date().toISOString()});await _cSet('gms_txns',l);}
+  }catch(e){_cQueue('tx',tx);}
+}
+async function _cloudSetTxStatus(ref,status){
+  if(!_cloudReady)return;
+  try{const l=(await _cloudGetTxns())||[];const t=l.find(x=>x.ref===ref);if(t){t.status=status;await _cSet('gms_txns',l);}}catch(e){}
+}
+function _cQueue(type,data){const q=JSON.parse(localStorage.getItem('gms_cq')||'[]');q.push({type,data});localStorage.setItem('gms_cq',JSON.stringify(q));}
+async function _cloudFlushQ(){
+  const q=JSON.parse(localStorage.getItem('gms_cq')||'[]');if(!q.length)return;
+  const fail=[];
+  for(const item of q){try{if(item.type==='user')await _cloudSaveUser(item.data);else await _cloudSaveTx(item.data);}catch(e){fail.push(item);}}
+  localStorage.setItem('gms_cq',JSON.stringify(fail));
+}
+_cloudInit();
 
-async function _cloudGet(binId) {
-  const r = await fetch(`$2a$10$E4QBq9ovIaRWE5rSmqSUTOAMV0e5VICb31aLQskeSfrhz/mIYpSom', {
-    headers: { 'X-Master-Key': GMS_API_KEY }
-  });
-  if (!r.ok) throw new Error('GET failed: ' + r.status);
-  const j = await r.json();
-  return j.record;
+// ============================================================
+// GMS PAYMENT — MoneyUnify (Airtel + MTN + Zamtel, Zambia)
+// ⚡ SETUP (3 min, free):
+//   1. Go to https://moneyunify.one  →  Sign Up (free)
+//   2. Click Businesses → Create Business
+//   3. Add 0773096780 or 0957366260 as your payout number
+//   4. Copy your Auth Key and paste it below replacing the
+//      placeholder. Looks like: pub_xxxxxxxxxxxxxxxxxx
+// ============================================================
+const MU_AUTH = '01KPVF1XR6VXQ5Z7RJZ117VK2N';
+
+function _muPhone(raw){
+  let n=raw.replace(/\D/g,'');
+  if(n.startsWith('0'))n='260'+n.slice(1);
+  if(!n.startsWith('260'))n='260'+n;
+  return n;
 }
 
-async function _cloudSet(binId, data) {
-  const r = await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Master-Key': GMS_API_KEY },
-    body: JSON.stringify(data)
+function buildMM(){
+  const loc=LOCAL_AMOUNTS[CU&&CU.country||'ZM']||LOCAL_AMOUNTS['ZM'];
+  document.getElementById('mm-opts').innerHTML=loc.providers.map(p=>
+    `<div class="mm-opt" onclick="selectMM('${p}')">${p}</div>`).join('');
+  ['pay-form','pay-processing','pay-success-box','pay-fail-box'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.style.display='none';
   });
-  if (!r.ok) throw new Error('PUT failed: ' + r.status);
-  return await r.json();
+  document.getElementById('pay-success-box').classList&&document.getElementById('pay-success-box').classList.remove('on');
+  _gmsPayBtnState(false);
 }
 
-async function _cloudCreate(name, data) {
-  const r = await fetch('https://api.jsonbin.io/v3/b', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Master-Key': GMS_API_KEY,
-      'X-Bin-Name': name,
-      'X-Bin-Private': 'true'
-    },
-    body: JSON.stringify(data)
-  });
-  if (!r.ok) throw new Error('CREATE failed: ' + r.status);
-  const j = await r.json();
-  return j.metadata.id;
+function selectMM(provider){
+  document.querySelectorAll('.mm-opt').forEach(el=>el.classList.toggle('sel',el.textContent===provider));
+  const el=document.getElementById('pay-phone-num');if(el)el.value='';
+  ['pay-fail-box','pay-success-box'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});
+  const pf=document.getElementById('pay-form');if(pf)pf.style.display='block';
+  _gmsPayBtnState(false);
 }
 
-// ---------- Init: auto-create bins if missing ----------
+function _gmsPayBtnState(on){
+  const b=document.getElementById('gms-pay-btn');
+  if(!b)return;
+  b.disabled=!on;b.style.opacity=on?'1':'.45';b.style.cursor=on?'pointer':'not-allowed';
+}
 
-async function _cloudInit() {
-  if (GMS_API_KEY === 'PASTE_YOUR_JSONBIN_SECRET_KEY_HERE') {
-    console.warn('[GMS] Cloud sync OFF — paste your JSONBin API key in script.js');
-    return;
+function gmsPayLive(){
+  const phone=(document.getElementById('pay-phone-num').value||'').trim();
+  _gmsPayBtnState(phone.replace(/\D/g,'').length>=9);
+}
+
+function gmsPayReset(){
+  ['pay-fail-box','pay-processing'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});
+  const pf=document.getElementById('pay-form');if(pf)pf.style.display='block';
+  const ph=document.getElementById('pay-phone-num');if(ph)ph.value='';
+  _gmsPayBtnState(false);
+}
+
+function _gmsProgress(steps,ms){
+  let i=0;
+  return setInterval(()=>{
+    if(i<steps.length){
+      const f=document.getElementById('pay-prog-fill');const m=document.getElementById('pay-proc-msg');
+      if(f)f.style.width=steps[i].pct+'%';if(m)m.textContent=steps[i].msg;i++;
+    }
+  },ms);
+}
+
+async function _muVerify(txId,maxMs=120000){
+  const start=Date.now();
+  while(Date.now()-start<maxMs){
+    await new Promise(r=>setTimeout(r,6000));
+    try{
+      const res=await fetch('https://api.moneyunify.one/payments/verify',{
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},
+        body:new URLSearchParams({transaction_id:txId,auth_id:MU_AUTH})
+      });
+      const d=await res.json();
+      const s=((d.data&&d.data.status)||'').toLowerCase();
+      if(['succeeded','successful','success','completed'].includes(s))return{ok:true,data:d};
+      if(['failed','error','cancelled'].includes(s))return{ok:false,reason:'Payment was declined or cancelled by your network. No money was deducted.'};
+    }catch(e){}
   }
-  try {
-    // Create users bin if not exists
-    if (!_cloudBins.users) {
-      _cloudBins.users = await _cloudCreate('gms_users', []);
-      localStorage.setItem(_BINS_KEY, JSON.stringify(_cloudBins));
-      console.log('[GMS] Created users bin:', _cloudBins.users);
-    }
-    // Create txns bin if not exists
-    if (!_cloudBins.txns) {
-      _cloudBins.txns = await _cloudCreate('gms_txns', []);
-      localStorage.setItem(_BINS_KEY, JSON.stringify(_cloudBins));
-      console.log('[GMS] Created txns bin:', _cloudBins.txns);
-    }
-    _cloudReady = true;
-    console.log('[GMS] ✅ Cloud sync ACTIVE — cross-device mode ON');
-    // Flush any queued local-only items
-    await _cloudFlushQueue();
-  } catch(e) {
-    console.warn('[GMS] Cloud init failed:', e.message);
-  }
+  return{ok:false,reason:'Payment timed out waiting for your PIN. If money was deducted from your account, contact GMS support with your phone number and time of payment.'};
 }
 
-// ---------- Users ----------
+async function gmsPayNow(){
+  const selProv=document.querySelector('.mm-opt.sel');
+  if(!selProv){toast('Select your network provider','err');return;}
+  const provider=selProv.textContent.trim();
+  const rawPhone=(document.getElementById('pay-phone-num').value||'').trim();
+  if(!rawPhone||rawPhone.replace(/\D/g,'').length<9){toast('Enter a valid mobile money number','err');return;}
 
-async function _cloudGetUsers() {
-  if (!_cloudReady) return null;
-  try { return await _cloudGet(_cloudBins.users); }
-  catch(e) { console.warn('[GMS] cloud getUsers failed', e); return null; }
-}
+  const phone=_muPhone(rawPhone);
+  const country=CU&&CU.country||'ZM';
+  const loc=LOCAL_AMOUNTS[country]||LOCAL_AMOUNTS['ZM'];
+  const amountRaw=parseFloat((loc.label||'').replace(/[^0-9.]/g,''))||147.42;
+  const amount=amountRaw;
+  const txRef='GMS-'+Date.now().toString().slice(-9);
 
-async function _cloudSaveUser(u) {
-  if (!_cloudReady) { _cloudQueue('user', u); return; }
-  try {
-    const users = (await _cloudGetUsers()) || [];
-    // Avoid duplicates by email/contact
-    const exists = users.find(x => x.email === (u.email||u.contact) || x.contact === (u.contact||u.email));
-    if (!exists) {
-      users.push({ ...u, _savedAt: new Date().toISOString() });
-      await _cloudSet(_cloudBins.users, users);
-    }
-  } catch(e) { console.warn('[GMS] cloud saveUser failed', e); _cloudQueue('user', u); }
-}
+  document.getElementById('pay-form').style.display='none';
+  document.getElementById('pay-fail-box').style.display='none';
+  document.getElementById('pay-success-box').style.display='none';
+  document.getElementById('pay-processing').style.display='block';
+  document.getElementById('pay-prog-fill').style.width='5%';
 
-async function _cloudDeleteUser(emailOrContact) {
-  if (!_cloudReady) return;
-  try {
-    let users = (await _cloudGetUsers()) || [];
-    users = users.filter(u => u.email !== emailOrContact && u.contact !== emailOrContact);
-    await _cloudSet(_cloudBins.users, users);
-  } catch(e) { console.warn('[GMS] cloud deleteUser failed', e); }
-}
+  const steps=[
+    {msg:'Sending USSD request to '+rawPhone+'...',pct:18},
+    {msg:'Waiting — check your phone and enter your PIN...',pct:38},
+    {msg:'Verifying payment with '+provider+'...',pct:62},
+    {msg:'Confirming transaction...',pct:82},
+    {msg:'Almost done...',pct:94},
+  ];
+  const ticker=_gmsProgress(steps,7000);
 
-async function _cloudUpdatePremium(emailOrContact, isPremium) {
-  if (!_cloudReady) return;
-  try {
-    const users = (await _cloudGetUsers()) || [];
-    let changed = false;
-    users.forEach(u => {
-      if (u.email === emailOrContact || u.contact === emailOrContact) {
-        u.isPremium = isPremium; changed = true;
-      }
+  try{
+    const initRes=await fetch('https://api.moneyunify.one/payments/request',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},
+      body:new URLSearchParams({from_payer:phone,amount:String(amount),auth_id:MU_AUTH})
     });
-    if (changed) await _cloudSet(_cloudBins.users, users);
-  } catch(e) { console.warn('[GMS] cloud updatePremium failed', e); }
-}
-
-// ---------- Transactions / Payment Requests ----------
-
-async function _cloudGetTxns() {
-  if (!_cloudReady) return null;
-  try { return await _cloudGet(_cloudBins.txns); }
-  catch(e) { console.warn('[GMS] cloud getTxns failed', e); return null; }
-}
-
-async function _cloudSaveTx(tx) {
-  if (!_cloudReady) { _cloudQueue('tx', tx); return; }
-  try {
-    const txns = (await _cloudGetTxns()) || [];
-    const exists = txns.find(t => t.ref === tx.ref);
-    if (!exists) {
-      txns.push({ ...tx, _savedAt: new Date().toISOString() });
-      await _cloudSet(_cloudBins.txns, txns);
+    const initData=await initRes.json();
+    if(initData.isError||!initData.data||!initData.data.transaction_id){
+      clearInterval(ticker);
+      _gmsPayFail(initData.message||initData.error||'Could not reach payment network. Check your number and internet connection.');
+      return;
     }
-  } catch(e) { console.warn('[GMS] cloud saveTx failed', e); _cloudQueue('tx', tx); }
-}
-
-async function _cloudUpdateTxStatus(ref, status) {
-  if (!_cloudReady) return;
-  try {
-    const txns = (await _cloudGetTxns()) || [];
-    const t = txns.find(x => x.ref === ref);
-    if (t) { t.status = status; await _cloudSet(_cloudBins.txns, txns); }
-  } catch(e) { console.warn('[GMS] cloud updateTx failed', e); }
-}
-
-// ---------- Offline queue (retry when back online) ----------
-
-function _cloudQueue(type, data) {
-  const q = JSON.parse(localStorage.getItem('gms_cq') || '[]');
-  q.push({ type, data, ts: Date.now() });
-  localStorage.setItem('gms_cq', JSON.stringify(q));
-}
-
-async function _cloudFlushQueue() {
-  const q = JSON.parse(localStorage.getItem('gms_cq') || '[]');
-  if (!q.length) return;
-  let remaining = [];
-  for (const item of q) {
-    try {
-      if (item.type === 'user') await _cloudSaveUser(item.data);
-      else if (item.type === 'tx') await _cloudSaveTx(item.data);
-    } catch(e) { remaining.push(item); }
-  }
-  localStorage.setItem('gms_cq', JSON.stringify(remaining));
-}
-
-// ---------- Status indicator ----------
-
-function _cloudStatusBadge() {
-  const el = document.getElementById('cloud-status');
-  if (!el) return;
-  if (_cloudReady) {
-    el.innerHTML = '<span style="color:#4ade80;font-size:.78rem;">🌐 Cross-device sync ON</span>';
-  } else {
-    el.innerHTML = '<span style="color:#fbbf24;font-size:.78rem;">💾 Local only (set API key)</span>';
+    const txId=initData.data.transaction_id;
+    const pMsg=document.getElementById('pay-proc-msg');
+    if(pMsg)pMsg.textContent='USSD sent — enter your PIN on your phone now to approve payment...';
+    const fill=document.getElementById('pay-prog-fill');if(fill)fill.style.width='32%';
+    const result=await _muVerify(txId);
+    clearInterval(ticker);
+    if(result.ok){
+      _gmsPaySuccess(txRef,txId,provider,amount,loc);
+    }else{
+      _gmsPayFail(result.reason);
+    }
+  }catch(err){
+    clearInterval(ticker);
+    _gmsPayFail('Network error. Please check your internet connection and try again.');
   }
 }
 
-// Start cloud init immediately
-_cloudInit().then(_cloudStatusBadge);
+function _gmsPaySuccess(txRef,txId,provider,amount,loc){
+  document.getElementById('pay-processing').style.display='none';
+  const fill=document.getElementById('pay-prog-fill');if(fill)fill.style.width='100%';
+  isPrem=true;
+  if(CU){
+    CU.isPremium=true;
+    sessionStorage.setItem('gms_sess',JSON.stringify(CU));
+    const users=DB.users;
+    const idx=users.findIndex(u=>u.email===CU.email||u.contact===CU.contact);
+    if(idx>-1){users[idx].isPremium=true;DB.users=users;}
+  }
+  const country=CU&&CU.country||'ZM';
+  const tx={
+    ref:txRef,muTxId:txId,user:CU&&CU.name||'',email:CU&&CU.email||'',
+    country:country,local:loc.label,localCur:loc.cur,
+    provider:provider,usd:7.65,status:'completed',
+    date:new Date().toISOString().split('T')[0],autoDeducted:true
+  };
+  DB.txns=[...DB.txns,tx];
+  _cloudSaveTx(tx);
+  if(CU&&CU.email)_cloudSetPremium(CU.email,true);
+  const refEl=document.getElementById('pay-success-ref');
+  if(refEl)refEl.textContent='Transaction ID: '+txId+'.';
+  const sb=document.getElementById('pay-success-box');
+  if(sb)sb.style.display='block';
+  setTimeout(()=>{closePay();updateDash();if(typeof renderTx==='function')renderTx();},3200);
+  toast('🎉 Vault unlocked! '+amount+' '+loc.cur+' deducted via '+provider,'ok');
+}
 
-// ============================================================
-// END OF CLOUD LAYER
-// ============================================================
+function _gmsPayFail(reason){
+  document.getElementById('pay-processing').style.display='none';
+  document.getElementById('pay-fail-msg').textContent=reason;
+  document.getElementById('pay-fail-box').style.display='block';
+  toast('❌ '+reason,'err');
+}
+
+function confirmPayment(){ gmsPayNow(); }
+function processPay(){ gmsPayNow(); }
 
 // ============================================================
 // SECURE ADMIN CREDENTIALS — encoded, never plain text in DOM
@@ -336,7 +374,6 @@ function handleRegister(){
   const nu={name:fn+' '+ln,email:ct,contact:ct,password:pw,country:cy,age:ag,ageGroup:ag<=30?'18-30':'30-50',isPremium:false,joined:new Date().toISOString().split('T')[0]};
   DB.users=[...users,nu];
   CU={...nu};
-  // ✅ Write to cloud — admin sees this from ANY device
   _cloudSaveUser(nu);
   sessionStorage.setItem('gms_sess',JSON.stringify(CU));
   document.getElementById('auth-gate').style.display='none';
@@ -412,30 +449,29 @@ function renderDash(){
 // ============================================================
 async function renderUsers(){
   const tbody=document.getElementById('u-tbody');
-  if(tbody) tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:rgba(255,255,255,.4);padding:1.5rem;">⏳ Loading registered users from all devices...</td></tr>';
-  // Pull from cloud (sees ALL devices), fall back to local
-  let cloudUsers = null;
-  try { cloudUsers = await _cloudGetUsers(); } catch(e){}
-  let allUsers = DB.users;
-  if(cloudUsers && cloudUsers.length > 0){
-    // Merge: cloud is source of truth, add any local-only users not yet synced
-    const cloudEmails = new Set(cloudUsers.map(u=>u.email||u.contact));
-    const localOnly = DB.users.filter(u=>!cloudEmails.has(u.email||u.contact));
-    allUsers = [...cloudUsers, ...localOnly];
-  }
+  if(tbody)tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:rgba(255,255,255,.4);padding:2rem;">⏳ Loading from all devices...</td></tr>';
+  let allUsers=DB.users;
+  try{
+    const cloud=await _cloudGetUsers();
+    if(cloud&&cloud.length>0){
+      const keys=new Set(cloud.map(u=>u.email||u.contact||''));
+      const localOnly=DB.users.filter(u=>!keys.has(u.email||u.contact||''));
+      allUsers=[...cloud,...localOnly];
+    }
+  }catch(e){}
   const q=(document.getElementById('u-search').value||'').toLowerCase();
   const fc=document.getElementById('u-fc').value;
   const fp=document.getElementById('u-fp').value;
   let users=allUsers;
-  if(q) users=users.filter(u=>(u.name||'').toLowerCase().includes(q)||(u.email||u.contact||'').toLowerCase().includes(q));
-  if(fc) users=users.filter(u=>u.country===fc);
-  if(fp!=='') users=users.filter(u=>String(u.isPremium)===fp);
+  if(q)users=users.filter(u=>(u.name||'').toLowerCase().includes(q)||(u.email||u.contact||'').toLowerCase().includes(q));
+  if(fc)users=users.filter(u=>u.country===fc);
+  if(fp!=='')users=users.filter(u=>String(u.isPremium)===fp);
   const total=users.length,pages=Math.max(1,Math.ceil(total/PG));
-  if(uPage>=pages) uPage=pages-1;
+  if(uPage>=pages)uPage=pages-1;
   const sl=users.slice(uPage*PG,(uPage+1)*PG);
-  const srcLabel = _cloudReady ? '🌐 All devices (cloud)' : '💾 This device only';
-  const srcColor = _cloudReady ? '#4ade80' : '#fbbf24';
-  if(tbody) tbody.innerHTML=sl.map((u,i)=>`
+  const lbl=_cloudReady?'🌐 All devices':'💾 This device only';
+  const clr=_cloudReady?'#4ade80':'#fbbf24';
+  if(tbody)tbody.innerHTML=sl.map((u,i)=>`
     <tr>
       <td>${uPage*PG+i+1}</td>
       <td><strong>${u.name||'—'}</strong></td>
@@ -444,18 +480,17 @@ async function renderUsers(){
       <td>${u.isPremium?'<span class="bdg by">⭐ Premium</span>':'<span class="bdg bgr">Free</span>'}</td>
       <td style="font-size:.75rem">${u.joined||'—'}</td>
       <td><button class="del-btn" onclick="delUser('${u.email||u.contact}')">🗑</button></td>
-    </tr>`).join('');
-  let pg=`<span style="color:rgba(255,255,255,.4);font-size:.8rem;margin-right:.4rem;">${total} users · <span style="color:${srcColor};">${srcLabel}</span></span>`;
-  for(let i=0;i<pages;i++) pg+=`<button class="abtn ${i===uPage?'abtn-g':'abtn-gh'}" onclick="uPage=${i};renderUsers()" style="min-width:34px;padding:.38rem .6rem;">${i+1}</button>`;
-  const pgEl=document.getElementById('u-pages');
-  if(pgEl) pgEl.innerHTML=pg;
+    </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:rgba(255,255,255,.3);padding:2rem;">No users yet</td></tr>';
+  let pg=`<span style="color:rgba(255,255,255,.4);font-size:.8rem;margin-right:.5rem;">${total} user${total!==1?'s':''} · <span style="color:${clr};">${lbl}</span></span>`;
+  for(let i=0;i<pages;i++)pg+=`<button class="abtn ${i===uPage?'abtn-g':'abtn-gh'}" onclick="uPage=${i};renderUsers()" style="min-width:34px;padding:.38rem .6rem;">${i+1}</button>`;
+  const pgEl=document.getElementById('u-pages');if(pgEl)pgEl.innerHTML=pg;
 }
 async function delUser(id){
-  if(!confirm('Delete this user permanently from ALL devices?'))return;
+  if(!confirm('Delete this user permanently from all devices?'))return;
   DB.users=DB.users.filter(u=>u.email!==id&&u.contact!==id);
   await _cloudDeleteUser(id);
   renderUsers();renderDash();
-  toast('User deleted from all devices','err');
+  toast('User deleted','err');
 }
 
 // ============================================================
@@ -1131,8 +1166,6 @@ function confirmPayment(){
     senderRef:ref, senderName:sender
   };
   DB.txns = [...DB.txns, pendingTx];
-  // ✅ Write to cloud — admin sees this payment request from ANY device
-  _cloudSaveTx(pendingTx);
   // Show pending message
   document.getElementById('pay-success-box').innerHTML = `<p>⏳ <strong>Payment submitted for review!</strong> Your transaction reference <strong>${ref}</strong> has been received. Our admin team will verify and unlock your access within 1–24 hours. You will see your Insider badge once confirmed.</p>`;
   document.getElementById('pay-success-box').classList.add('on');
@@ -1287,109 +1320,88 @@ function selectMM(provider){
 // ADMIN — PAYMENT CONFIRMATIONS
 // ============================================================
 async function renderPayConfirm(){
-  // Pull latest from cloud so admin sees requests from ALL user devices
   if(_cloudReady){
     try{
-      const cloudTxns = await _cloudGetTxns();
-      if(cloudTxns && cloudTxns.length > 0){
-        const existingRefs = new Set(DB.txns.map(t=>t.ref));
-        const newOnes = cloudTxns.filter(t=>!existingRefs.has(t.ref));
-        if(newOnes.length > 0){
-          DB.txns = [...DB.txns, ...newOnes];
-        }
-        // Also update statuses from cloud (so admin changes reflect)
-        cloudTxns.forEach(ct=>{
-          const local = DB.txns.find(t=>t.ref===ct.ref);
-          if(local && local.status !== ct.status) local.status = ct.status;
-        });
+      const cloud=await _cloudGetTxns();
+      if(cloud&&cloud.length>0){
+        const refs=new Set(DB.txns.map(t=>t.ref));
+        cloud.filter(t=>!refs.has(t.ref)).forEach(t=>DB.txns.push(t));
+        cloud.forEach(ct=>{const loc=DB.txns.find(t=>t.ref===ct.ref);if(loc&&loc.status!==ct.status)loc.status=ct.status;});
       }
-    }catch(e){ console.warn('[GMS] Could not load cloud txns for admin panel',e); }
+    }catch(e){}
   }
-  const fs = (document.getElementById('pc-fs')||{}).value||'';
-  let txns = DB.txns.filter(t=>t.status==='pending_admin'||t.status==='completed'||t.status==='rejected');
-  if(fs) txns = txns.filter(t=>t.status===fs);
-  const pending = DB.txns.filter(t=>t.status==='pending_admin').length;
-  const today   = new Date().toISOString().split('T')[0];
-  const unlocked= DB.txns.filter(t=>t.status==='completed'&&t.date===today).length;
-  const rejected= DB.txns.filter(t=>t.status==='rejected').length;
-  const el = document.getElementById('pc-pending-count');
-  if(el) el.textContent=pending;
-  const el2 = document.getElementById('pc-unlocked-count');
-  if(el2) el2.textContent=unlocked;
-  const el3 = document.getElementById('pc-rejected-count');
-  if(el3) el3.textContent=rejected;
-  const list = document.getElementById('pc-list');
-  if(!list) return;
-  if(txns.length===0){list.innerHTML='<div style="color:rgba(255,255,255,.35);text-align:center;padding:2rem;">No payment submissions yet</div>';return;}
-  list.innerHTML = txns.slice().reverse().map(t=>{
-    const sc = {pending_admin:'by',completed:'bg',rejected:'br'};
-    const isPend = t.status==='pending_admin';
-    return `<div class="pay-pend-card">
-      <div class="pay-pend-top">
-        <div>
-          <div style="color:#fff;font-weight:700;">${t.senderName||t.user} <span class="bdg ${sc[t.status]||'bgr'}">${t.status==='pending_admin'?'⏳ Pending':t.status==='completed'?'✅ Unlocked':'❌ Rejected'}</span></div>
-          <div class="pay-pend-ref">${t.ref} · ${t.email||'—'} · ${t.country} · ${t.date}</div>
-          <div style="color:rgba(255,255,255,.55);font-size:.8rem;margin-top:.3rem;">Provider: ${t.provider} · Amount: ${t.local} (≈$${t.usd}) · Sender Ref: <strong style="color:var(--gold2);">${t.senderRef||'—'}</strong></div>
+  const fs=(document.getElementById('pc-fs')||{}).value||'';
+  let txns=DB.txns.filter(t=>t.status==='pending_admin'||t.status==='completed'||t.status==='rejected');
+  if(fs)txns=txns.filter(t=>t.status===fs);
+  const pending=DB.txns.filter(t=>t.status==='pending_admin').length;
+  const today=new Date().toISOString().split('T')[0];
+  const unlocked=DB.txns.filter(t=>t.status==='completed'&&t.date===today).length;
+  const rejected=DB.txns.filter(t=>t.status==='rejected').length;
+  const el=document.getElementById('pc-pending-count');if(el)el.textContent=pending;
+  const el2=document.getElementById('pc-unlocked-count');if(el2)el2.textContent=unlocked;
+  const el3=document.getElementById('pc-rejected-count');if(el3)el3.textContent=rejected;
+  const list=document.getElementById('pc-list');if(!list)return;
+  if(!txns.length){list.innerHTML='<div style="color:rgba(255,255,255,.35);text-align:center;padding:2rem 1rem;">No payment submissions yet.</div>';return;}
+  const srcLbl=_cloudReady?'🌐 All devices':'💾 This device';
+  const srcClr=_cloudReady?'#4ade80':'#fbbf24';
+  list.innerHTML='<div style="color:'+srcClr+';font-size:.78rem;text-align:right;margin-bottom:.6rem;">'+srcLbl+'</div>'+
+    txns.slice().reverse().map(t=>{
+      const isPend=t.status==='pending_admin';
+      const sc={pending_admin:'by',completed:'bg',rejected:'br'};
+      const autoBadge=t.autoDeducted?'<span class="bdg bg" style="font-size:.68rem;margin-left:.3rem;">✅ Auto-deducted</span>':'';
+      return `<div class="pay-pend-card">
+        <div class="pay-pend-top">
+          <div>
+            <div style="color:#fff;font-weight:700;">${t.senderName||t.user} <span class="bdg ${sc[t.status]||'bgr'}">${t.status==='pending_admin'?'⏳ Pending':t.status==='completed'?'✅ Unlocked':'❌ Rejected'}</span>${autoBadge}</div>
+            <div class="pay-pend-ref">${t.ref} · ${t.email||'—'} · ${t.country} · ${t.date||'—'}</div>
+            <div style="color:rgba(255,255,255,.5);font-size:.8rem;margin-top:.25rem;">Provider: ${t.provider||'—'} · Amount: ${t.local||'—'} · Tx: <strong style="color:var(--gold2);">${t.muTxId||t.senderRef||t.flwRef||'—'}</strong></div>
+          </div>
+          <div class="pay-pend-btns">${isPend?`<button class="abtn abtn-g" onclick="adminUnlock('${t.ref}')">✅ Confirm &amp; Unlock</button><button class="abtn abtn-r" onclick="adminReject('${t.ref}')">❌ Reject</button>`:`<button class="abtn abtn-gh" onclick="adminLock('${t.ref}')">🔒 Revoke</button>`}</div>
         </div>
-        <div class="pay-pend-btns">
-          ${isPend?`<button class="abtn abtn-g" onclick="adminUnlock('${t.ref}')">✅ Confirm & Unlock</button><button class="abtn abtn-r" onclick="adminReject('${t.ref}')">❌ Reject</button>`:''}
-          ${t.status==='completed'?`<button class="abtn abtn-r" style="font-size:.72rem;" onclick="adminLock('${t.ref}')">🔒 Revoke Access</button>`:''}
-          ${t.status==='rejected'?`<button class="abtn abtn-g" style="font-size:.72rem;" onclick="adminUnlock('${t.ref}')">↩ Re-unlock</button>`:''}
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+      </div>`;
+    }).join('');
 }
 
 async function adminUnlock(txRef){
-  const txns = DB.txns;
-  const tx = txns.find(t=>t.ref===txRef);
+  const txns=DB.txns;
+  const tx=txns.find(t=>t.ref===txRef);
   if(!tx){toast('Transaction not found','err');return;}
-  tx.status='completed';
-  DB.txns=txns;
-  // ✅ Sync to cloud — user's device sees the unlock
-  await _cloudUpdateTxStatus(txRef,'completed');
-  if(tx.email) await _cloudUpdatePremium(tx.email,true);
-  // Unlock the user locally
+  tx.status='completed';DB.txns=txns;
+  await _cloudSetTxStatus(txRef,'completed');
+  if(tx.email)await _cloudSetPremium(tx.email,true);
   const users=DB.users;
   const idx=users.findIndex(u=>u.email===tx.email||u.name===tx.user);
   if(idx>-1){users[idx].isPremium=true;DB.users=users;}
-  // If this is the currently logged-in user, update session live
   if(CU&&(CU.email===tx.email||CU.name===tx.user)){
     CU.isPremium=true;isPrem=true;
     sessionStorage.setItem('gms_sess',JSON.stringify(CU));
     updateDash();
   }
-  renderPayConfirm();renderDash();renderTx();
+  renderPayConfirm();renderDash();if(typeof renderTx==='function')renderTx();
   toast('✅ Access unlocked for '+(tx.senderName||tx.user)+'!','ok');
 }
 
 async function adminReject(txRef){
-  if(!confirm('Reject this payment and deny access?')) return;
-  const txns=DB.txns;
-  const tx=txns.find(t=>t.ref===txRef);
-  if(tx) tx.status='rejected';
-  DB.txns=txns;
-  await _cloudUpdateTxStatus(txRef,'rejected');
-  renderPayConfirm();
-  toast('❌ Payment rejected','err');
+  if(!confirm('Reject this payment?'))return;
+  const txns=DB.txns;const tx=txns.find(t=>t.ref===txRef);
+  if(tx)tx.status='rejected';DB.txns=txns;
+  await _cloudSetTxStatus(txRef,'rejected');
+  renderPayConfirm();toast('❌ Payment rejected','err');
 }
 
 async function adminLock(txRef){
-  if(!confirm('Revoke premium access for this user?')) return;
-  const txns=DB.txns;
-  const tx=txns.find(t=>t.ref===txRef);
+  if(!confirm('Revoke premium access for this user?'))return;
+  const txns=DB.txns;const tx=txns.find(t=>t.ref===txRef);
   if(tx){
     tx.status='rejected';
     const users=DB.users;
     const idx=users.findIndex(u=>u.email===tx.email||u.name===tx.user);
     if(idx>-1){users[idx].isPremium=false;DB.users=users;}
     DB.txns=txns;
-    await _cloudUpdateTxStatus(txRef,'rejected');
-    if(tx.email) await _cloudUpdatePremium(tx.email,false);
+    await _cloudSetTxStatus(txRef,'rejected');
+    if(tx.email)await _cloudSetPremium(tx.email,false);
   }
-  renderPayConfirm();renderDash();
-  toast('🔒 Access revoked','err');
+  renderPayConfirm();renderDash();toast('🔒 Access revoked','err');
 }
 
 // ============================================================
@@ -1434,7 +1446,7 @@ async function vaultGrant(email){
   if(idx===-1){toast('User not found','err');return;}
   users[idx].isPremium=true;
   DB.users=users;
-  await _cloudUpdatePremium(email,true);
+  await _cloudSetPremium(email,true);
   // If this is currently logged-in user, update live
   if(CU&&(CU.email===email||CU.contact===email)){
     CU.isPremium=true;isPrem=true;
@@ -1459,7 +1471,7 @@ async function vaultRevoke(email){
   if(idx===-1){toast('User not found','err');return;}
   users[idx].isPremium=false;
   DB.users=users;
-  await _cloudUpdatePremium(email,false);
+  await _cloudSetPremium(email,false);
   if(CU&&(CU.email===email||CU.contact===email)){
     CU.isPremium=false;isPrem=false;
     sessionStorage.setItem('gms_sess',JSON.stringify(CU));
@@ -2104,4 +2116,6 @@ function scrollToHome(){
 
 document.getElementById('pay-ov').addEventListener('click',function(e){if(e.target===this)closePay();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeTopic();closePay();}});
+
+
 

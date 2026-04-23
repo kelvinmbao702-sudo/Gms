@@ -1,4 +1,45 @@
 // ============================================================
+// SAFE STORAGE SHIM
+// Fixes: "ReferenceError: localStorage is not defined"
+// Covers all environments: WebView, private mode, iframes,
+// sandboxed browsers. Falls back to in-memory storage silently.
+// ============================================================
+(function(){
+  function _memStore(){
+    var m={};
+    return {
+      getItem:function(k){return m.hasOwnProperty(k)?m[k]:null;},
+      setItem:function(k,v){m[k]=String(v);},
+      removeItem:function(k){delete m[k];},
+      clear:function(){m={};},
+      key:function(i){return Object.keys(m)[i]||null;},
+      get length(){return Object.keys(m).length;}
+    };
+  }
+  // Test if localStorage is available
+  try{
+    var _t='__gms_test__';
+    window.localStorage.setItem(_t,_t);
+    window.localStorage.removeItem(_t);
+  }catch(e){
+    // Not available — use in-memory fallback
+    try{ Object.defineProperty(window,'localStorage',{value:_memStore(),writable:false}); }
+    catch(e2){ window.localStorage = _memStore(); }
+    console.warn('[GMS] localStorage unavailable — using memory store (data will not persist across page loads)');
+  }
+  // Test sessionStorage
+  try{
+    var _t2='__gms_test2__';
+    window.sessionStorage.setItem(_t2,_t2);
+    window.sessionStorage.removeItem(_t2);
+  }catch(e){
+    try{ Object.defineProperty(window,'sessionStorage',{value:_memStore(),writable:false}); }
+    catch(e2){ window.sessionStorage = _memStore(); }
+    console.warn('[GMS] sessionStorage unavailable — using memory store');
+  }
+})();
+
+// ============================================================
 // GMS CLOUD SYNC — all signups & payments visible to admin
 // from ANY device. Powered by jsonstore.io (free, zero setup).
 // Token is derived from your admin credentials — private to you.
@@ -80,9 +121,11 @@ _cloudInit();
 const MU_AUTH = '01KPVF1XR6VXQ5Z7RJZ117VK2N';
 
 function _muPhone(raw){
+  // MoneyUnify expects local format: 09xxxxxxxx or 07xxxxxxxx
+  // Do NOT convert to 260 prefix — confirmed from API docs
   let n=raw.replace(/\D/g,'');
-  if(n.startsWith('0'))n='260'+n.slice(1);
-  if(!n.startsWith('260'))n='260'+n;
+  if(n.startsWith('260'))n='0'+n.slice(3); // +260... → 0...
+  if(!n.startsWith('0'))n='0'+n;
   return n;
 }
 
@@ -162,8 +205,9 @@ async function gmsPayNow(){
   const phone=_muPhone(rawPhone);
   const country=CU&&CU.country||'ZM';
   const loc=LOCAL_AMOUNTS[country]||LOCAL_AMOUNTS['ZM'];
-  const amountRaw=parseFloat((loc.label||'').replace(/[^0-9.]/g,''))||147.42;
-  const amount=amountRaw;
+  // Hardcoded amounts per currency — avoids label string parsing errors
+  const AMOUNTS={ZM:147.42,KE:988.38,NG:10327.50,ZA:125.08,TZ:19813.50,GH:83.46,MW:13196.25,ZW:7.65};
+  const amount=AMOUNTS[country]||147.42;
   const txRef='GMS-'+Date.now().toString().slice(-9);
 
   document.getElementById('pay-form').style.display='none';
@@ -190,7 +234,9 @@ async function gmsPayNow(){
     const initData=await initRes.json();
     if(initData.isError||!initData.data||!initData.data.transaction_id){
       clearInterval(ticker);
-      _gmsPayFail(initData.message||initData.error||'Could not reach payment network. Check your number and internet connection.');
+      // Show exact API error so we know what's wrong
+      const errMsg = initData.message||initData.error||JSON.stringify(initData)||'Could not reach payment network.';
+      _gmsPayFail('❌ '+errMsg+' — Phone: '+phone+' Amount: '+amount);
       return;
     }
     const txId=initData.data.transaction_id;
